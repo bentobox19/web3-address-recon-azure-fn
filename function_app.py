@@ -129,21 +129,26 @@ class AlchemyClient:
         result = await self._alchemy_request(network, "eth_getCode", [address, "latest"])
         return result == '0x' if result else None
 
+    # Check for masterCopy() (method signature 0xa619486e),
+    # a good indicator of a Gnosis Safe proxy
     async def is_safe(self, network, address):
         params = [{"to": address, "data": "0xa619486e"}, "latest"]
         result = await self._alchemy_request(network, "eth_call", params)
         return result is not None and result != '0x'
 
+    # Check for getThreshold() (method signature 0xe75235b8)
     async def get_safe_threshold(self, network, address):
         params = [{"to": address, "data": "0xe75235b8"}, "latest"]
         result = await self._alchemy_request(network, "eth_call", params)
         return int(result, 16) if result and result != '0x' else None
 
+    # Check for nonce() (method signature 0xaffed0e0)
     async def get_safe_nonce(self, network, address):
         params = [{"to": address, "data": "0xaffed0e0"}, "latest"]  # Corrected to getNonce
         result = await self._alchemy_request(network, "eth_call", params)
         return int(result, 16) if result and result != '0x' else None
 
+    # Check for getOwners(method signature 0xa0e67e2b)
     async def get_safe_owners(self, network, address):
         params = [{"to": address, "data": "0xa0e67e2b"}, "latest"]
         result = await self._alchemy_request(network, "eth_call", params)
