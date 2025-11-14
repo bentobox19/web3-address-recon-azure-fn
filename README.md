@@ -6,6 +6,7 @@
 - Development Notes
   - Tools
   - Running locally
+  - Deploy to Azure
   - Learning
 
 <!-- /MarkdownTOC -->
@@ -19,7 +20,6 @@ Azure functions cousin of https://github.com/bentobox19/web3-address-recon
 ### Tools
 
 ````bash
-# brew tap azure/functions
 brew install azure/functions/azure-functions-core-tools@4
 ````
 
@@ -69,6 +69,20 @@ The expected format of the list of wallets is `[Network] [Address]`
 Base 0x1F98431c8aD98523631AE4a59f267346ea31F984
 Ethereum 0x00000000219ab540356cBB839Cbe05303d7705Fa
 Optimism 0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb
+````
+
+### Deploy to Azure
+
+````bash
+brew install azure-cli
+
+# Try and `az logout` when you are done
+az login
+
+# The following steps assume your function has been already created in the azure portal
+# You can learn more about the process here:
+# https://learn.microsoft.com/en-us/azure/azure-functions/how-to-create-function-azure-cli
+func azure functionapp publish <YOUR AZURE_FUNCTION_NAME>
 ````
 
 ### Learning
