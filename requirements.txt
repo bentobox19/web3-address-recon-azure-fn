@@ -1,0 +1,3 @@
+azure-functions
+httpx[http2]
+aiolimiter
