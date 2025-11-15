@@ -54,8 +54,7 @@ func start
 ````
 
 ````bash
-# Try it this way
-
+# Test the function locally
 curl -X POST \
   http://localhost:7071/api/Web3AddressAnalyzerHttp \
   -F "file=@/path/to/your/list/of/wallets.txt"
