@@ -6,7 +6,6 @@
 - Development Notes
   - Tools
   - Running locally
-  - Render the output locally
   - Deploy to Azure
   - Learning
 
@@ -70,18 +69,6 @@ Base 0x1F98431c8aD98523631AE4a59f267346ea31F984
 Ethereum 0x00000000219ab540356cBB839Cbe05303d7705Fa
 Optimism 0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb
 ````
-
-### Render the output locally
-
-````bash
-# In MacOS you can test the output
-
-# (WORK IN PROGRESS)
-
-sed "s#/\* EMBED JSON ARRAY HERE \*/#$(cat /tmp/json-output.json)#" ./viz/template.html > /tmp/test.html && open /tmp/test.html
-
-````
-
 
 ### Deploy to Azure
 
