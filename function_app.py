@@ -31,6 +31,9 @@ async def Web3AddressAnalyzerHttp(req: func.HttpRequest) -> func.HttpResponse:
                 network, address = parts[0].lower(), parts[1]
                 addresses.append((network, address))
 
+            # Remove duplicates
+            addresses = list(dict.fromkeys(addresses))
+
         client = AlchemyClient(api_key)
         analyzer = AddressAnalyzer(client)
         results = await analyzer.process(addresses)
