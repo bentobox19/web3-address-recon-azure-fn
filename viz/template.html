@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web3 Address Recon Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d1d5db' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'></circle><line x1='21' y1='21' x2='16.65' y2='16.65'></line></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Dark gray background */
+        }
+        .loader {
+            border-top-color: #3b82f6;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        @-webkit-keyframes spinner {
+            0% { -webkit-transform: rotate(0deg); }
+            100% { -webkit-transform: rotate(360deg); }
+        }
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-bar-container {
+            background-color: #374151; /* gray-700 */
+            border-radius: 9999px;
+            height: 0.75rem; /* h-3 */
+            overflow: hidden;
+        }
+        .progress-bar {
+            border-radius: 9999px;
+            height: 100%;
+            transition: width 0.5s ease-in-out;
+        }
+        #breakdown-card:hover:not(:has(#eoa-breakdown:hover, #safe-breakdown:hover, #sc-breakdown:hover)) {
+            background-color: #374151; /* gray-700 */
+        }
+        #eoa-breakdown:hover,
+        #safe-breakdown:hover,
+        #sc-breakdown:hover {
+            background-color: #374151; /* gray-700 */
+        }
+    </style>
+</head>
+<body class="text-gray-300">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-white">Web3 Recon Dashboard</h1>
+            <p class="text-gray-400 mt-1">View wallet analysis from embedded data.</p>
+        </header>
+
+        <div class="bg-yellow-900 bg-opacity-50 border-l-4 border-yellow-700 text-yellow-300 p-4 rounded-md mb-8" role="alert">
+            <p class="font-bold">Assumption</p>
+            <p>ETH price is assumed to be <strong>$3,700 USD</strong> for all calculations.</p>
+        </div>
+
+        <main id="dashboard-content" class="hidden">
+            <section id="key-stats" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
+                <div id="total-funds-card" class="bg-gray-800 p-6 rounded-lg shadow-lg cursor-pointer hover:bg-gray-700 transition-colors">
+                    <h2 class="text-sm font-medium text-gray-400 uppercase whitespace-nowrap">Total Funds Surveyed</h2>
+                    <p id="total-funds" class="text-3xl font-bold mt-2 text-white">$0.00</p>
+                    <p id="total-eth" class="text-sm text-gray-400 mt-1">0 ETH</p>
+                    <p class="text-sm text-gray-400 mt-1">Click to view all addresses</p>
+                </div>
+
+                <div id="breakdown-card" class="bg-gray-800 p-6 rounded-lg shadow-lg cursor-pointer transition-colors">
+                    <h2 class="text-sm font-medium text-gray-400 uppercase mb-4">Address Breakdown</h2>
+                    <div class="space-y-4">
+                        <div id="eoa-breakdown" class="rounded-md transition-colors cursor-pointer">
+                            <div class="flex justify-between items-baseline mb-1">
+                                <span class="text-sm text-gray-400 font-medium">EOA (<span id="eoa-count">0</span>)</span>
+                                <span class="text-sm text-white font-semibold" id="eoa-value">$0 (0.00%)</span>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div id="eoa-bar" class="progress-bar bg-blue-500" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div id="safe-breakdown" class="rounded-md transition-colors cursor-pointer">
+                            <div class="flex justify-between items-baseline mb-1">
+                                <span class="text-sm text-gray-400 font-medium">SAFE (<span id="safe-count">0</span>)</span>
+                                <span class="text-sm text-white font-semibold" id="safe-value">$0 (0.00%)</span>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div id="safe-bar" class="progress-bar bg-green-500" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div id="sc-breakdown" class="rounded-md transition-colors cursor-pointer">
+                             <div class="flex justify-between items-baseline mb-1">
+                                <span class="text-sm text-gray-400 font-medium">Smart Contracts (<span id="sc-count">0</span>)</span>
+                                <span class="text-sm text-white font-semibold" id="sc-value">$0 (0.00%)</span>
+                            </div>
+                            <div class="progress-bar-container">
+                                <div id="sc-bar" class="progress-bar bg-yellow-500" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="unique-owners-card" class="bg-gray-800 p-6 rounded-lg shadow-lg cursor-pointer hover:bg-gray-700 transition-colors hidden">
+                    <h2 class="text-sm font-medium text-gray-400 uppercase whitespace-nowrap">Total Unique Owners</h2>
+                    <p id="unique-owners-count" class="text-3xl font-bold mt-2 text-white">0</p>
+                    <p class="text-sm text-gray-400 mt-1">Click to view details</p>
+                </div>
+            </section>
+
+            <section id="owner-portfolios" class="bg-gray-800 p-6 rounded-lg shadow-lg mb-8 hidden">
+                <h2 class="text-xl font-bold text-white mb-4">Owner Portfolios</h2>
+                <p class="text-gray-400 mb-6">Unique owners and the cumulative value of the SAFE wallets they control.</p>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-700">
+                        <thead class="bg-gray-700">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Owner Address</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Controlled SAFE Wallets</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Total Controlled Value (USD)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="owner-table-body" class="bg-gray-800 divide-y divide-gray-700"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="all-addresses-section" class="bg-gray-800 p-6 rounded-lg shadow-lg mb-8 hidden">
+                <h2 id="addresses-title" class="text-xl font-bold text-white mb-4">All Surveyed Addresses</h2>
+                <p id="addresses-description" class="text-gray-400 mb-6">A complete list of all addresses found in the data, sorted by balance.</p>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-700">
+                        <thead id="addresses-thead" class="bg-gray-700"></thead>
+                        <tbody id="all-addresses-table-body" class="bg-gray-800 divide-y divide-gray-700"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="profile-section" class="bg-gray-800 p-6 rounded-lg shadow-lg mb-8 hidden">
+                <button id="back-button" class="mb-4 text-blue-400 hover:underline">&lt; Back</button>
+                <h2 id="profile-title" class="text-xl font-bold text-white mb-4">Address Profile</h2>
+                <div id="profile-content" class="space-y-2"></div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const jsonData = [/* EMBED JSON ARRAY HERE */];
+    </script>
+
+    <script type="module">
+        const ETH_PRICE_USD = 3700;
+        const WEI_PER_ETH = 10n ** 18n;
+
+        const dashboardContent = document.getElementById('dashboard-content');
+
+        const totalFundsCard = document.getElementById('total-funds-card');
+        const breakdownCard = document.getElementById('breakdown-card');
+        const eoaBreakdown = document.getElementById('eoa-breakdown');
+        const safeBreakdown = document.getElementById('safe-breakdown');
+        const scBreakdown = document.getElementById('sc-breakdown');
+        const uniqueOwnersCard = document.getElementById('unique-owners-card');
+
+        const ownerPortfoliosSection = document.getElementById('owner-portfolios');
+        const allAddressesSection = document.getElementById('all-addresses-section');
+        const addressesTitle = document.getElementById('addresses-title');
+        const addressesDescription = document.getElementById('addresses-description');
+        const addressesThead = document.getElementById('addresses-thead');
+        const allAddressesTableBody = document.getElementById('all-addresses-table-body');
+
+        const profileSection = document.getElementById('profile-section');
+        const backButton = document.getElementById('back-button');
+        const profileTitle = document.getElementById('profile-title');
+        const profileContent = document.getElementById('profile-content');
+
+        const formatCurrency = (value) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+        const formatNumber = (value) => new Intl.NumberFormat('en-US').format(value);
+
+        const formatCompactCurrency = (value) => {
+            if (value >= 1e9) return `$${(value / 1e9).toFixed(1)}B`;
+            if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
+            if (value >= 1e3) return `$${(value / 1e3).toFixed(1)}K`;
+            return formatCurrency(value);
+        };
+
+        const weiToEth = (weiString) => {
+            if (!weiString) return 0;
+            try {
+                const weiBigInt = BigInt(weiString);
+                const ethValue = Number(weiBigInt * 1000000n / WEI_PER_ETH) / 1000000;
+                return ethValue;
+            } catch (e) {
+                console.error(`Could not convert wei string to BigInt: ${weiString}`, e);
+                return 0;
+            }
+        };
+
+        let allAddresses = [];
+        let currentFilter = 'all';
+        let previousFilter = null;
+
+        const setFilter = (filter) => {
+            currentFilter = filter;
+            uniqueOwnersCard.classList.toggle('hidden', filter !== 'safe');
+            populateAddressesTable(filter);
+            allAddressesSection.classList.remove('hidden');
+            ownerPortfoliosSection.classList.add('hidden');
+        };
+
+        totalFundsCard.addEventListener('click', () => setFilter('all'));
+
+        breakdownCard.addEventListener('click', () => setFilter('all'));
+
+        eoaBreakdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setFilter('eoa');
+        });
+
+        safeBreakdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setFilter('safe');
+        });
+
+        scBreakdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setFilter('sc');
+        });
+
+        uniqueOwnersCard.addEventListener('click', () => {
+            allAddressesSection.classList.add('hidden');
+            ownerPortfoliosSection.classList.remove('hidden');
+        });
+
+        backButton.addEventListener('click', () => {
+            profileSection.classList.add('hidden');
+            document.getElementById('key-stats').classList.remove('hidden');
+            setFilter(previousFilter);
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            runAnalysis(jsonData);
+            dashboardContent.classList.remove('hidden');
+        });
+
+        function showProfile(addressData) {
+            profileTitle.textContent = `Profile for ${addressData.address}`;
+
+            const ethBalance = weiToEth(addressData.balanceWei);
+            let contentHtml = `
+                <p class="text-gray-300"><strong class="text-white">Address:</strong> ${addressData.address}</p>
+                <p class="text-gray-300"><strong class="text-white">Native Balance:</strong> ${ethBalance.toFixed(3)} ETH</p>
+                <p class="text-gray-300"><strong class="text-white">Market Value:</strong> ${formatCurrency(ethBalance * ETH_PRICE_USD)}</p>
+                <p class="text-gray-300"><strong class="text-white">Type:</strong> ${addressData.isSafe ? 'SAFE Wallet' : (addressData.isEoa ? 'EOA' : 'Smart Contract')}</p>
+            `;
+
+            if (addressData.isSafe) {
+                contentHtml += `
+                    <p class="text-gray-300"><strong class="text-white">Threshold / Owners:</strong> ${addressData.threshold ?? 'N/A'} / ${addressData.owners.length ?? 'N/A'}</p>
+                    <h3 class="text-lg font-bold text-white mt-4 mb-2">Owners:</h3>
+                    <ul class="list-disc pl-6 space-y-1">
+                `;
+
+                addressData.owners.forEach(owner => {
+                    contentHtml += `<li><a href="https://etherscan.io/address/${owner}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">${owner}</a></li>`;
+                });
+
+                contentHtml += `</ul>`;
+            }
+
+            profileContent.innerHTML = contentHtml;
+
+            document.getElementById('key-stats').classList.add('hidden');
+            allAddressesSection.classList.add('hidden');
+            ownerPortfoliosSection.classList.add('hidden');
+            profileSection.classList.remove('hidden');
+        }
+
+        function populateAddressesTable(filter) {
+            let filteredAddresses = allAddresses;
+
+            if (filter === 'eoa') {
+                filteredAddresses = allAddresses.filter(data => data.isEoa && !data.isSafe);
+            } else if (filter === 'safe') {
+                filteredAddresses = allAddresses.filter(data => data.isSafe);
+            } else if (filter === 'sc') {
+                filteredAddresses = allAddresses.filter(data => !data.isEoa && !data.isSafe);
+            }
+
+            filteredAddresses.sort((a, b) => {
+                if (b.balanceWei > a.balanceWei) return 1;
+                if (b.balanceWei < a.balanceWei) return -1;
+                return 0;
+            });
+
+            // Update title and description
+            if (filter === 'all') {
+                addressesTitle.textContent = 'All Surveyed Addresses';
+                addressesDescription.textContent = 'A complete list of all addresses found in the data, sorted by balance.';
+            } else if (filter === 'eoa') {
+                addressesTitle.textContent = 'Surveyed Externally Owned Addresses (EOAs)';
+                addressesDescription.textContent = 'A list of EOAs found in the data, sorted by balance.';
+            } else if (filter === 'safe') {
+                addressesTitle.textContent = 'Surveyed Safe Wallets';
+                addressesDescription.textContent = 'A list of Safe Wallets found in the data, sorted by balance.';
+            } else if (filter === 'sc') {
+                addressesTitle.textContent = 'Surveyed Smart Contracts (Not Safe Wallets)';
+                addressesDescription.textContent = 'A list of Smart Contracts (Not Safe Wallets) found in the data, sorted by balance.';
+            }
+
+            // Build thead
+            let theadHtml = `
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Address</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Native Balance (ETH)</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Market Value (USD)</th>
+            `;
+            if (filter === 'all') {
+                theadHtml += `<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Address Type</th>`;
+            } else if (filter === 'safe') {
+                theadHtml += `<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Threshold / Owners</th>`;
+            }
+            theadHtml += `<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">View in Etherscan</th>`;
+            theadHtml += `</tr>`;
+            addressesThead.innerHTML = theadHtml;
+
+            // Build tbody
+            allAddressesTableBody.innerHTML = '';
+            filteredAddresses.forEach(data => {
+                const row = document.createElement('tr');
+
+                // Address TD (clickable for profile)
+                const addressTd = document.createElement('td');
+                addressTd.className = 'px-6 py-4 whitespace-nowrap text-sm text-blue-400 font-mono cursor-pointer hover:underline';
+                addressTd.textContent = data.address;
+                addressTd.addEventListener('click', () => {
+                    previousFilter = filter;
+                    showProfile(data);
+                });
+                row.appendChild(addressTd);
+
+                // Native Balance TD
+                const ethValue = weiToEth(data.balanceWei);
+                const nativeTd = document.createElement('td');
+                nativeTd.className = 'px-6 py-4 whitespace-nowrap text-sm text-white';
+                nativeTd.textContent = `${ethValue.toFixed(3)} ETH`;
+                row.appendChild(nativeTd);
+
+                // Market Value TD
+                const marketTd = document.createElement('td');
+                marketTd.className = 'px-6 py-4 whitespace-nowrap text-sm text-white font-semibold';
+                marketTd.textContent = formatCurrency(ethValue * ETH_PRICE_USD);
+                row.appendChild(marketTd);
+
+                // Type-specific TD
+                if (filter === 'all') {
+                    const addressType = data.isSafe ? 'SAFE Wallet' : (data.isEoa ? 'EOA' : 'Smart Contract');
+                    const typeTd = document.createElement('td');
+                    typeTd.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-400';
+                    typeTd.textContent = addressType;
+                    row.appendChild(typeTd);
+                } else if (filter === 'safe') {
+                    const thresholdOwner = `${data.threshold ?? 'N/A'} / ${data.owners.length ?? 'N/A'}`;
+                    const thresholdTd = document.createElement('td');
+                    thresholdTd.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-400';
+                    thresholdTd.textContent = thresholdOwner;
+                    row.appendChild(thresholdTd);
+                }
+
+                // Etherscan TD
+                const etherscanTd = document.createElement('td');
+                etherscanTd.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-400';
+                etherscanTd.innerHTML = `
+                    <a href="https://etherscan.io/address/${data.address}" target="_blank" rel="noopener noreferrer">
+                        <svg class="w-5 h-5 text-blue-400 hover:text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                        </svg>
+                    </a>
+                `;
+                row.appendChild(etherscanTd);
+
+                allAddressesTableBody.appendChild(row);
+            });
+        }
+
+        function runAnalysis(jsonArray) {
+            // Filter to Ethereum (as per original assumption)
+            const ethData = jsonArray.filter(item => item.network === 'ethereum');
+
+            // 1. Calculate Total Funds
+            const totalFundsWei = ethData.reduce((sum, item) => sum + BigInt(item.evm_properties.native_balance), 0n);
+            const totalEth = weiToEth(totalFundsWei);
+            const totalFundsUsd = totalEth * ETH_PRICE_USD;
+            document.getElementById('total-funds').textContent = formatCurrency(totalFundsUsd);
+            document.getElementById('total-eth').textContent = `${totalEth.toFixed(4)} ETH`;
+
+            // 2. Process All Addresses for Breakdown and Detailed Table
+            allAddresses = [];
+            const breakdown = {
+                eoa: { count: 0, totalWei: 0n },
+                safe: { count: 0, totalWei: 0n },
+                sc: { count: 0, totalWei: 0n },
+            };
+
+            ethData.forEach(item => {
+                const { address } = item;
+                const { native_balance, is_safe, is_eoa } = item.evm_properties;
+                const balanceWei = BigInt(native_balance);
+                const isSafe = is_safe;
+                const isEoa = is_eoa;
+                const threshold = item.safe_details?.threshold || null;
+                const owners = item.safe_details?.owners || [];
+
+                allAddresses.push({ address, balanceWei, isSafe, isEoa, threshold, owners });
+
+                if (isSafe) {
+                    breakdown.safe.count++;
+                    breakdown.safe.totalWei += balanceWei;
+                } else if (isEoa) {
+                    breakdown.eoa.count++;
+                    breakdown.eoa.totalWei += balanceWei;
+                } else {
+                    breakdown.sc.count++;
+                    breakdown.sc.totalWei += balanceWei;
+                }
+            });
+
+            // 3. Populate Address Breakdown Card
+            const populateBreakdown = (type, data) => {
+                const eth = weiToEth(data.totalWei);
+                const usd = eth * ETH_PRICE_USD;
+                const percentage = totalFundsUsd > 0 ? (usd / totalFundsUsd) * 100 : 0;
+
+                document.getElementById(`${type}-count`).textContent = formatNumber(data.count);
+                document.getElementById(`${type}-value`).textContent = `${formatCompactCurrency(usd)} (${percentage.toFixed(2)}%)`;
+                document.getElementById(`${type}-bar`).style.width = `${percentage}%`;
+            };
+
+            populateBreakdown('eoa', breakdown.eoa);
+            populateBreakdown('safe', breakdown.safe);
+            populateBreakdown('sc', breakdown.sc);
+
+            // 4. Populate All Surveyed Addresses Table (initially with 'all')
+            populateAddressesTable('all');
+
+            // 5. Process and Populate Owner Portfolios
+            const ownerPortfolios = {};
+            ethData.filter(item => item.evm_properties.is_safe).forEach(item => {
+                const balance = BigInt(item.evm_properties.native_balance);
+                item.safe_details.owners.forEach(owner => {
+                    if (!ownerPortfolios[owner]) {
+                        ownerPortfolios[owner] = { safes: new Set(), totalWei: 0n };
+                    }
+                    ownerPortfolios[owner].safes.add(item.address);
+                    ownerPortfolios[owner].totalWei += balance;
+                });
+            });
+
+            const ownerTableBody = document.getElementById('owner-table-body');
+            ownerTableBody.innerHTML = '';
+            const sortedOwners = Object.entries(ownerPortfolios).sort(([, a], [, b]) => {
+                if (b.totalWei > a.totalWei) return 1;
+                if (b.totalWei < a.totalWei) return -1;
+                return 0;
+            });
+
+            document.getElementById('unique-owners-count').textContent = formatNumber(sortedOwners.length);
+
+            sortedOwners.forEach(([owner, data]) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400 font-mono">
+                        <a href="https://etherscan.io/address/${owner}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline">${owner}</a>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">${data.safes.size}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-white font-semibold">${formatCurrency(weiToEth(data.totalWei) * ETH_PRICE_USD)}</td>
+                `;
+                ownerTableBody.appendChild(row);
+            });
+        }
+    </script>
+</body>
+</html>
