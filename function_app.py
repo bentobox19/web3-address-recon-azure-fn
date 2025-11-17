@@ -91,20 +91,21 @@ class AddressAnalyzer:
 class AlchemyClient:
     def __init__(self, api_key):
         self.base_urls = {
-            "arbitrum": f"https://arb-mainnet.g.alchemy.com/v2/{api_key}",
-            "avalanche": f"https://avax-mainnet.g.alchemy.com/v2/{api_key}",
-            "base": f"https://base-mainnet.g.alchemy.com/v2/{api_key}",
-            "bsc": f"https://bnb-mainnet.g.alchemy.com/v2/{api_key}",
-            "ethereum": f"https://eth-mainnet.g.alchemy.com/v2/{api_key}",
-            "linea": f"https://linea-mainnet.g.alchemy.com/v2/{api_key}",
-            "optimism": f"https://opt-mainnet.g.alchemy.com/v2/{api_key}",
-            "polygon": f"https://polygon-mainnet.g.alchemy.com/v2/{api_key}",
-            "sei": f"https://sei-mainnet.g.alchemy.com/v2/{api_key}",
-            "zksync": f"https://zksync-mainnet.g.alchemy.com/v2/{api_key}"
+            "arbitrum": f"https://arb-mainnet.g.alchemy.com/v2",
+            "avalanche": f"https://avax-mainnet.g.alchemy.com/v2",
+            "base": f"https://base-mainnet.g.alchemy.com/v2",
+            "bsc": f"https://bnb-mainnet.g.alchemy.com/v2",
+            "ethereum": f"https://eth-mainnet.g.alchemy.com/v2",
+            "linea": f"https://linea-mainnet.g.alchemy.com/v2",
+            "optimism": f"https://opt-mainnet.g.alchemy.com/v2",
+            "polygon": f"https://polygon-mainnet.g.alchemy.com/v2",
+            "sei": f"https://sei-mainnet.g.alchemy.com/v2",
+            "zksync": f"https://zksync-mainnet.g.alchemy.com/v2"
         }
         self._http = httpx.AsyncClient(timeout=10, http2=True)
         self._rate_limit = AsyncLimiter(250, 1)  # 250 req/sec
-        self._concurrency = asyncio.Semaphore(50)  # 50 concurrent
+        self._concurrency = asyncio.Semaphore(100)  # 100 concurrent
+        self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
     async def aclose(self):
         await self._http.aclose()
@@ -117,7 +118,7 @@ class AlchemyClient:
         try:
             async with self._rate_limit:
                 async with self._concurrency:
-                    resp = await self._http.post(url, json=payload)
+                    resp = await self._http.post(url, json=payload, headers=self.headers)
             resp.raise_for_status()
             return resp.json().get("result")
         except Exception as e:
