@@ -16,6 +16,20 @@ app = func.FunctionApp()
 async def Web3AddressAnalyzerHttp(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
 
+    SUPPORTED_NETWORKS = [
+        "arbitrum",
+        "avalanche",
+        "base",
+        "bsc",
+        "ethereum",
+        "linea",
+        "monad",
+        "optimism",
+        "polygon",
+        "sei",
+        "zksync",
+    ]
+
     try:
         api_key = os.getenv("ALCHEMY_API_KEY")
         if not api_key:
@@ -29,7 +43,8 @@ async def Web3AddressAnalyzerHttp(req: func.HttpRequest) -> func.HttpResponse:
             for line in lines:
                 parts = line.split()
                 network, address = parts[0].lower(), parts[1].lower()
-                addresses.append((network, address))
+                if network in SUPPORTED_NETWORKS:
+                    addresses.append((network, address))
 
             # Remove duplicates
             addresses = list(dict.fromkeys(addresses))
@@ -64,14 +79,15 @@ class AddressAnalyzer:
             "bytecode_sample": bytecode_sample
         }
 
+        if bytecode_sample.startswith("0xef0100"):
+            notes["smart_contract_type"] = "eip_7702_delegation"
+        elif bytecode_sample == "0x60806040526004361061006557600035":
+            notes["smart_contract_type"] = "fee_distributor"
+
         if network == "ethereum":
             atype = self.ETH_ADDRESS_SMART_CONTRACT_TYPE_IDS.get(lower_address)
             if atype:
                 notes["smart_contract_type"] = atype
-            elif bytecode_sample == "0x60806040526004361061006557600035":
-                notes["smart_contract_type"] = "fee_distributor"
-            elif bytecode_sample == "0xef010063c0c19a282a1b52b07dd5a65b":
-                notes["smart_contract_type"] = "eip_7702_delegation"
 
         return notes
 
@@ -122,7 +138,6 @@ class AddressAnalyzer:
         results = await asyncio.gather(*tasks)
         return results
 
-
 class AlchemyClient:
     def __init__(self, api_key):
         self.base_urls = {
@@ -132,6 +147,7 @@ class AlchemyClient:
             "bsc": f"https://bnb-mainnet.g.alchemy.com/v2",
             "ethereum": f"https://eth-mainnet.g.alchemy.com/v2",
             "linea": f"https://linea-mainnet.g.alchemy.com/v2",
+            "monad": f"https://monad-mainnet.g.alchemy.com/v2",
             "optimism": f"https://opt-mainnet.g.alchemy.com/v2",
             "polygon": f"https://polygon-mainnet.g.alchemy.com/v2",
             "sei": f"https://sei-mainnet.g.alchemy.com/v2",
