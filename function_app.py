@@ -5,6 +5,8 @@ import json
 import logging
 import os
 from aiolimiter import AsyncLimiter
+from dataclasses import dataclass
+from decimal import Decimal
 
 # Minimal logging
 logging.basicConfig(level=logging.INFO)
@@ -15,20 +17,6 @@ app = func.FunctionApp()
 @app.route(route="Web3AddressAnalyzerHttp", auth_level=func.AuthLevel.ANONYMOUS)
 async def Web3AddressAnalyzerHttp(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Python HTTP trigger function processed a request.')
-
-    SUPPORTED_NETWORKS = [
-        "arbitrum",
-        "avalanche",
-        "base",
-        "bsc",
-        "ethereum",
-        "linea",
-        "monad",
-        "optimism",
-        "polygon",
-        "sei",
-        "zksync",
-    ]
 
     try:
         api_key = os.getenv("ALCHEMY_API_KEY")
@@ -43,7 +31,7 @@ async def Web3AddressAnalyzerHttp(req: func.HttpRequest) -> func.HttpResponse:
             for line in lines:
                 parts = line.split()
                 network, address = parts[0].lower(), parts[1].lower()
-                if network in SUPPORTED_NETWORKS:
+                if network in NETWORK_CAPABILITIES:
                     addresses.append((network, address))
 
             # Remove duplicates
@@ -59,6 +47,29 @@ async def Web3AddressAnalyzerHttp(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"Main error: {e}")
         return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+
+@dataclass
+class NetworkCapabilities:
+    network: str
+    is_evm: bool
+    native_symbol: str
+    native_decimals: int
+    alchemy_rpc_supported: bool
+    alchemy_network_name: str
+
+NETWORK_CAPABILITIES = {
+    "arbitrum": NetworkCapabilities("arbitrum", True, "ETH", 18, True, "arb"),
+    "avalanche": NetworkCapabilities("avalanche", True, "AVAX", 18, True, "avax"),
+    "base": NetworkCapabilities("base", True, "ETH", 18, True, "base"),
+    "bsc": NetworkCapabilities("bsc", True, "BNB", 18, True, "bnb"),
+    "ethereum": NetworkCapabilities("ethereum", True, "ETH", 18, True, "eth"),
+    "linea": NetworkCapabilities("linea", True, "ETH", 18, True, "linea"),
+    "monad": NetworkCapabilities("monad", True, "MON", 18, True, "monad"),
+    "optimism": NetworkCapabilities("optimism", True, "ETH", 18, True, "opt"),
+    "polygon": NetworkCapabilities("polygon", True, "POL", 18, True, "polygon"),
+    "sei": NetworkCapabilities("sei", True, "SEI", 18, True, "sei"),
+    "zksync": NetworkCapabilities("zksync", True, "ETH", 18, True, "zksync"),
+}
 
 class AddressAnalyzer:
     ETH_ADDRESS_SMART_CONTRACT_TYPE_IDS = {
@@ -94,19 +105,29 @@ class AddressAnalyzer:
     async def analyze(self, semaphore: asyncio.Semaphore, network: str, address: str):
         async with semaphore:
             result = {"network": network, "address": address}
+
+            caps = NETWORK_CAPABILITIES.get(network)
+            if not caps:
+                result["error"] = "Network is not supported"
+                return result
+
             try:
                 balance_task = self.client.get_native_balance(network, address)
                 is_safe_task = self.client.is_safe(network, address)
                 bytecode_task = self.client.get_bytecode(network, address)
 
-                balance, bytecode, is_safe = await asyncio.gather(
+                balance_wei_str, bytecode, is_safe = await asyncio.gather(
                     balance_task, bytecode_task, is_safe_task
                 )
 
+                balance_wei = int(balance_wei_str)
+                balance_native = Decimal(balance_wei) / Decimal(10**caps.native_decimals)
                 is_eoa = bytecode == '0x'
 
                 result["evm_properties"] = {
-                    "native_balance": balance,
+                    "native_balance_wei": str(balance_wei),
+                    "native_balance": f"{balance_native:.18f}".rstrip('0').rstrip('.'),
+                    "native_symbol": caps.native_symbol,
                     "is_eoa": is_eoa,
                     "is_safe": is_safe
                 }
@@ -141,17 +162,9 @@ class AddressAnalyzer:
 class AlchemyClient:
     def __init__(self, api_key):
         self.base_urls = {
-            "arbitrum": f"https://arb-mainnet.g.alchemy.com/v2",
-            "avalanche": f"https://avax-mainnet.g.alchemy.com/v2",
-            "base": f"https://base-mainnet.g.alchemy.com/v2",
-            "bsc": f"https://bnb-mainnet.g.alchemy.com/v2",
-            "ethereum": f"https://eth-mainnet.g.alchemy.com/v2",
-            "linea": f"https://linea-mainnet.g.alchemy.com/v2",
-            "monad": f"https://monad-mainnet.g.alchemy.com/v2",
-            "optimism": f"https://opt-mainnet.g.alchemy.com/v2",
-            "polygon": f"https://polygon-mainnet.g.alchemy.com/v2",
-            "sei": f"https://sei-mainnet.g.alchemy.com/v2",
-            "zksync": f"https://zksync-mainnet.g.alchemy.com/v2"
+            net_name: f"https://{caps.alchemy_network_name}-mainnet.g.alchemy.com/v2"
+            for net_name, caps in NETWORK_CAPABILITIES.items()
+            if caps.alchemy_rpc_supported
         }
         self._http = httpx.AsyncClient(timeout=10, http2=True)
         self._rate_limit = AsyncLimiter(250, 1)  # 250 req/sec
@@ -162,10 +175,11 @@ class AlchemyClient:
         await self._http.aclose()
 
     async def _alchemy_request(self, network, method, params):
-        if network not in self.base_urls:
-            return None
-        url = self.base_urls[network]
+        url = self.base_urls.get(network)
+        if not url:
+            raise ValueError(f"Network '{network}' is not supported by AlchemyClient.")
         payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": 1}
+
         try:
             async with self._rate_limit:
                 async with self._concurrency:
