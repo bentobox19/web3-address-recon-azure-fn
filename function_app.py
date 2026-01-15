@@ -7,9 +7,10 @@ import os
 from aiolimiter import AsyncLimiter
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Optional
 
 # Minimal logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = func.FunctionApp()
@@ -23,30 +24,43 @@ async def Web3AddressAnalyzerHttp(req: func.HttpRequest) -> func.HttpResponse:
         if not api_key:
             return func.HttpResponse("ALCHEMY_API_KEY not set", status_code=500)
 
-        file = req.files.get('file')
-        if file:
-            content = file.read().decode('utf-8')
-            lines = [line.strip() for line in content.split('\n') if line.strip()]
-            addresses = []
-            for line in lines:
-                parts = line.split()
-                network, address = parts[0].lower(), parts[1].lower()
-                if network in NETWORK_CAPABILITIES:
-                    addresses.append((network, address))
+        addresses = parse_addresses_file(req.files.get('file'))
 
-            # Remove duplicates
-            addresses = list(dict.fromkeys(addresses))
+        # Single shared HTTP client
+        http_client = httpx.AsyncClient(timeout=10, http2=True)
 
-        client = AlchemyClient(api_key)
-        analyzer = AddressAnalyzer(client)
+        alchemy_client = AlchemyClient(api_key, http_client)
+        blockstream_client = BlockStreamClient(http_client)
+        analyzer = AddressAnalyzer(alchemy_client, blockstream_client)
+
         results = await analyzer.process(addresses)
-        await client.aclose()
+
+        await http_client.aclose()
 
         return func.HttpResponse(body=json.dumps(results), mimetype="application/json")
 
     except Exception as e:
         logger.error(f"Main error: {e}")
         return func.HttpResponse(f"Error: {str(e)}", status_code=500)
+
+def parse_addresses_file(file) -> List[Dict]:
+    if not file:
+        raise ValueError("Missing addresses file")
+
+    content = file.read().decode('utf-8')
+    lines = [line.strip() for line in content.split('\n') if line.strip()]
+    addresses = []
+    for line in lines:
+        parts = line.split()
+        network, address = parts[0].lower(), parts[1]
+        if network in NETWORK_CAPABILITIES:
+            # BTC addresses are case-sensitive, keep original case
+            address = address if network == "btc" else address.lower()
+            addresses.append((network, address))
+
+    # Remove duplicates
+    addresses = list(dict.fromkeys(addresses))
+    return addresses
 
 @dataclass
 class NetworkCapabilities:
@@ -55,13 +69,14 @@ class NetworkCapabilities:
     native_symbol: str
     native_decimals: int
     alchemy_rpc_supported: bool
-    alchemy_network_name: str
+    alchemy_network_name: Optional[str]
 
 NETWORK_CAPABILITIES = {
     "arbitrum": NetworkCapabilities("arbitrum", True, "ETH", 18, True, "arb"),
     "avalanche": NetworkCapabilities("avalanche", True, "AVAX", 18, True, "avax"),
     "base": NetworkCapabilities("base", True, "ETH", 18, True, "base"),
     "bsc": NetworkCapabilities("bsc", True, "BNB", 18, True, "bnb"),
+    "btc": NetworkCapabilities("btc", False, "BTC", 8, False, None),
     "ethereum": NetworkCapabilities("ethereum", True, "ETH", 18, True, "eth"),
     "linea": NetworkCapabilities("linea", True, "ETH", 18, True, "linea"),
     "monad": NetworkCapabilities("monad", True, "MON", 18, True, "monad"),
@@ -71,6 +86,48 @@ NETWORK_CAPABILITIES = {
     "zksync": NetworkCapabilities("zksync", True, "ETH", 18, True, "zksync"),
 }
 
+class BlockStreamClient:
+    def __init__(self, http_client: httpx.AsyncClient):
+        self._http = http_client
+        self.base_url = "https://blockstream.info/api"
+        self._rate_limit = AsyncLimiter(10, 1)  # 10 req/sec
+
+    async def get_btc_address_info(self, address: str) -> dict:
+        url = f"{self.base_url}/address/{address}"
+
+        try:
+            async with self._rate_limit:
+                resp = await self._http.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Calculate confirmed balance (funded - spent)
+            chain_stats = data.get("chain_stats", {})
+            confirmed_balance = (
+                chain_stats.get("funded_txo_sum", 0) -
+                chain_stats.get("spent_txo_sum", 0)
+            )
+
+            # Calculate mempool balance
+            mempool_stats = data.get("mempool_stats", {})
+            mempool_balance = (
+                mempool_stats.get("funded_txo_sum", 0) -
+                mempool_stats.get("spent_txo_sum", 0)
+            )
+
+            return {
+                "confirmed_balance_satoshi": confirmed_balance,
+                "mempool_balance_satoshi": mempool_balance,
+                "total_balance_satoshi": confirmed_balance + mempool_balance
+            }
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Blockstream API error for {address}: {e.response.status_code}")
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching BTC address info for {address}: {e}")
+            raise
+
 class AddressAnalyzer:
     ETH_ADDRESS_SMART_CONTRACT_TYPE_IDS = {
         "0xd19d4b5d358258f05d7b411e21a1460d11b0876f": "linea_rollup",
@@ -78,8 +135,9 @@ class AddressAnalyzer:
         "0x0345e97b81cb9c42f2c58b6b94e5b65f0dc2eea0": "ninja_trading",
     }
 
-    def __init__(self, client):
-        self.client = client
+    def __init__(self, alchemy_client, mempool_client):
+        self.alchemy_client = alchemy_client
+        self.mempool_client = mempool_client
         self.prices = {}
 
     async def _fetch_prices(self, addresses):
@@ -92,7 +150,7 @@ class AddressAnalyzer:
         if not unique_symbols:
             return
 
-        price_data = await self.client.get_prices_by_symbol(list(unique_symbols))
+        price_data = await self.alchemy_client.get_prices_by_symbol(list(unique_symbols))
         for item in price_data:
             symbol = item.get("symbol")
             if symbol and item.get("prices"):
@@ -123,7 +181,54 @@ class AddressAnalyzer:
 
         return notes
 
-    async def analyze(self, semaphore: asyncio.Semaphore, network: str, address: str):
+    async def analyze_btc(self, semaphore: asyncio.Semaphore, address: str):
+        async with semaphore:
+            result = {"network": "btc", "address": address}
+
+            caps = NETWORK_CAPABILITIES.get("btc")
+            if not caps:
+                result["error"] = "BTC Network is not supported"
+                return result
+
+            try:
+                btc_info = await self.mempool_client.get_btc_address_info(address)
+
+                total_satoshi = btc_info["total_balance_satoshi"]
+                confirmed_satoshi = btc_info["confirmed_balance_satoshi"]
+                mempool_satoshi = btc_info["mempool_balance_satoshi"]
+
+                # Convert satoshi to BTC
+                balance_btc = Decimal(total_satoshi) / Decimal(10**caps.native_decimals)
+
+                result["btc_properties"] = {
+                    "confirmed_balance_satoshi": str(confirmed_satoshi),
+                    "mempool_balance_satoshi": str(mempool_satoshi),
+                    "total_balance_satoshi": str(total_satoshi),
+                    "balance_btc": f"{balance_btc:.8f}".rstrip('0').rstrip('.')
+                }
+
+                # Add price info if available
+                price_info = self.prices.get("BTC")
+                if price_info:
+                    price = price_info["price_usd"]
+                    retrieved_at = price_info["retrieved_at"]
+                    balance_usd = balance_btc * price
+
+                    result["price_info"] = {
+                        "native_balance": f"{balance_btc:.8f}".rstrip('0').rstrip('.'),
+                        "native_balance_usd": f"{balance_usd:.2f}".rstrip('0').rstrip('.'),
+                        "native_symbol": "BTC",
+                        "price_retrieved_at": retrieved_at,
+                        "price_usd": f"{price:.18f}".rstrip('0').rstrip('.')
+                    }
+
+            except Exception as e:
+                logger.error(f"Error processing btc:{address}: {e}")
+                result["error"] = str(e)
+
+            return result
+
+    async def analyze_evm(self, semaphore: asyncio.Semaphore, network: str, address: str):
         async with semaphore:
             result = {"network": network, "address": address}
 
@@ -133,9 +238,9 @@ class AddressAnalyzer:
                 return result
 
             try:
-                balance_task = self.client.get_native_balance(network, address)
-                is_safe_task = self.client.is_safe(network, address)
-                bytecode_task = self.client.get_bytecode(network, address)
+                balance_task = self.alchemy_client.get_native_balance(network, address)
+                is_safe_task = self.alchemy_client.is_safe(network, address)
+                bytecode_task = self.alchemy_client.get_bytecode(network, address)
 
                 balance_wei_str, bytecode, is_safe = await asyncio.gather(
                     balance_task, bytecode_task, is_safe_task
@@ -157,21 +262,21 @@ class AddressAnalyzer:
                     retrieved_at = price_info["retrieved_at"]
                     native_balance_usd = balance_native * price
 
-                result["price_info"] = {
-                    "native_balance": f"{balance_native:.18f}".rstrip('0').rstrip('.'),
-                    "native_balance_usd": f"{native_balance_usd:.18f}".rstrip('0').rstrip('.'),
-                    "native_symbol": caps.native_symbol,
-                    "price_retrieved_at": retrieved_at,
-                    "price_usd": f"{price:.18f}".rstrip('0').rstrip('.')
-                }
+                    result["price_info"] = {
+                        "native_balance": f"{balance_native:.18f}".rstrip('0').rstrip('.'),
+                        "native_balance_usd": f"{native_balance_usd:.2f}".rstrip('0').rstrip('.'),
+                        "native_symbol": caps.native_symbol,
+                        "price_retrieved_at": retrieved_at,
+                        "price_usd": f"{price:.18f}".rstrip('0').rstrip('.')
+                    }
 
                 if not is_eoa and not is_safe:
                     result["notes"] = self._get_contract_notes(network, address, bytecode)
 
                 if is_safe:
-                    threshold_task = self.client.get_safe_threshold(network, address)
-                    nonce_task = self.client.get_safe_nonce(network, address)
-                    owners_task = self.client.get_safe_owners(network, address)
+                    threshold_task = self.alchemy_client.get_safe_threshold(network, address)
+                    nonce_task = self.alchemy_client.get_safe_nonce(network, address)
+                    owners_task = self.alchemy_client.get_safe_owners(network, address)
                     threshold, nonce, owners = await asyncio.gather(
                         threshold_task, nonce_task, owners_task
                     )
@@ -188,28 +293,33 @@ class AddressAnalyzer:
 
     async def process(self, addresses):
         await self._fetch_prices(addresses)
-        semaphore = asyncio.Semaphore(10)  # 10 concurrent workers (adjust as needed)
-        tasks = [self.analyze(semaphore, net, addr) for net, addr in addresses]
+        semaphore = asyncio.Semaphore(10)
+
+        tasks = []
+        for net, addr in addresses:
+            if net == "btc":
+                tasks.append(self.analyze_btc(semaphore, addr))
+            else:
+                tasks.append(self.analyze_evm(semaphore, net, addr))
+
         results = await asyncio.gather(*tasks)
+
         return results
 
 class AlchemyClient:
-    def __init__(self, api_key):
-        self._http = httpx.AsyncClient(timeout=10, http2=True)
+    def __init__(self, api_key: str, http_client: httpx.AsyncClient):
+        self._http = http_client
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
         self.base_urls = {
             net_name: f"https://{caps.alchemy_network_name}-mainnet.g.alchemy.com/v2"
             for net_name, caps in NETWORK_CAPABILITIES.items()
-            if caps.alchemy_rpc_supported
+            if caps.alchemy_rpc_supported and caps.alchemy_network_name is not None
         }
         self.prices_api_url = "https://api.g.alchemy.com/prices/v1"
 
         self._rate_limit = AsyncLimiter(250, 1)  # 250 req/sec
         self._concurrency = asyncio.Semaphore(100)  # 100 concurrent
-
-    async def aclose(self):
-        await self._http.aclose()
 
     async def get_prices_by_symbol(self, symbols: list[str]) -> list:
         url = f"{self.prices_api_url}/tokens/by-symbol"
@@ -223,7 +333,7 @@ class AlchemyClient:
             logger.error(f"Price API request failed: {e.response.status_code} - {e.response.text}")
             return []
         except Exception as e:
-            logger.error(f"Eror fetching prices for symbols {symbols}: {e}")
+            logger.error(f"Error fetching prices for symbols {symbols}: {e}")
             return []
 
     async def _blockchain_node_request(self, network, method, params):

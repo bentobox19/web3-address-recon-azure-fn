@@ -42,7 +42,7 @@ Add this file `local.settings.json`
 # First time
 python3 -m venv .venv
 
-# Active the virtual environment
+# Activate the virtual environment
 source .venv/bin/activate
 
 # Install the required packages
@@ -50,6 +50,9 @@ pip install -r requirements.txt
 ````
 
 ````bash
+# Activate the virtual environment
+source .venv/bin/activate
+
 func start
 ````
 
