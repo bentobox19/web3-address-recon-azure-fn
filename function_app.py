@@ -7,7 +7,7 @@ import os
 from aiolimiter import AsyncLimiter
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
+from typing import Dict, List, Optional
 
 # Minimal logging
 logging.basicConfig(level=logging.DEBUG)

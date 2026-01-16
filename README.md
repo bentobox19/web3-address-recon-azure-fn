@@ -81,6 +81,9 @@ brew install azure-cli
 # Try and `az logout` when you are done
 az login
 
+# Deploy within the virtual environment to avoid unexpected results
+source .venv/bin/activate
+
 # The following steps assume your function has been already created in the azure portal
 # You can learn more about the process here:
 # https://learn.microsoft.com/en-us/azure/azure-functions/how-to-create-function-azure-cli
